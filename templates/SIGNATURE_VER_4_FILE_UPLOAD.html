@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+   <title>Evaporate Example</title>
+
+   <script src="https://sdk.amazonaws.com/js/aws-sdk-2.2.43.min.js"></script>
+   <script type="text/javascript" src="jquery-3.0.0.js"></script>
+
+   <script language="javascript" type="text/javascript" src="evaporate.js"></script>
+
+</head>
+
+<body onload="onLoadInit()">
+
+  <h1>Using EvaporateJS with AWS V4 Signatures</h1>
+
+  <div>
+
+    <h2>Demo</h2>
+
+
+
+  </div>
+  <b>PRE-REQUISITE: save valid access token first </b><BR>
+  <b>STEP-1: Get upload info from public-api </b> <BR>
+  <b>STEP-2: Load uploadInfo response in the text area </b> <BR>
+  <b>STEP-3: Browse File to upload <BR>
+
+  <BR><BR>
+<input type="text" id='access_token' placeholder="save access token"/>
+<input type="button" onclick="saveAccessToken()" value="Save Access Token"/>
+<BR>
+Enter public-api uploadInfo response
+<BR>
+<textarea rows="5" cols="50" id="papiUploadInfoResponse"></textarea>
+
+<BR>
+<input type="file" id="files"  multiple />
+
+
+
+
+  <script language="javascript">
+  var papiAwsCredJsonObj = {"aws_key":'', 'bucket' :'', 'awsRegion':'', 'awsUrl' : '' };
+  var ACCESS_TOKEN = '70be014fc9c793bc40e9831b7faab1f6';
+  var ACCESS_TOKEN_KEY = 'ACCESS_TOKEN_KEY'
+  var UPLOAD_SINGER_URL = 'https://captivateprimeqe.adobe.com/primeapi/v2/uploadSigner';
+  var UPLOAD_INFO_URL = 'https://captivateprimeqe.adobe.com/primeapi/v2/uploadInfo';
+
+  function isEmpty(str){
+    return str === '' || str === undefined || str === null;
+  }
+
+  function onLoadInit(){
+     if(isEmpty(getAccessToken())){
+       alert("save access token first");
+       return;
+     }
+     getUploadInfo();
+  }
+
+  function saveAccessToken(){
+    let access_token = document.getElementById('access_token').value;
+    console.log('Access Token: ' + access_token);
+    localStorage.setItem(ACCESS_TOKEN_KEY, access_token);
+    getUploadInfo();
+    alert("saved");
+  }
+
+  function getAccessToken(){
+    let accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+    return accessToken;
+  }
+
+  function getUploadInfo(){
+    $.ajax({
+					url: UPLOAD_INFO_URL,
+          crossDomain : true,
+          dataType : "json",
+          beforeSend: function(xhr) {
+                      	xhr.setRequestHeader('Accept','application/vnd.api+json');
+                        xhr.setRequestHeader('Authorization', 'oauth '+ getAccessToken());
+              		}
+        }).then(function(response){
+            document.getElementById('papiUploadInfoResponse').value = JSON.stringify(response);
+            saveAwsCred();
+        });
+  }
+
+  function saveAwsCred(){
+    let papiAwsCredStr = document.getElementById('papiUploadInfoResponse').value;
+    console.log(papiAwsCredStr);
+    if(isEmpty(papiAwsCredStr))
+    {
+      alert("aws credential can not be null. Please input public-api response");
+      return;
+    }
+    papiAwsCredJsonObj = JSON.parse(papiAwsCredStr);
+    awsKey = papiAwsCredJsonObj.awsKey;
+    awsRegion = papiAwsCredJsonObj.region;
+    awsBucket = papiAwsCredJsonObj.bucket;
+    const awsRegionUrl = papiAwsCredJsonObj.region.indexOf("us-") === 0 ?
+                              ".s3.amazonaws.com/" : ".s3." + papiAwsCredJsonObj.region + ".amazonaws.com/" ;
+    const awsUrl = window.location.host.indexOf("9010") === -1 ?
+                                  "https://" +
+                                  papiAwsCredJsonObj.bucket + awsRegionUrl + papiAwsCredJsonObj.key :
+                                  "http://localhost:4567/" + papiAwsCredJsonObj.bucket + "/" + papiAwsCredJsonObj.key;
+    alert("awsUrl: " + awsUrl);
+    papiAwsCredJsonObj.awsUrl = awsUrl;
+    initEvaporate(getEvaporateConfig());
+  }
+
+  function getEvaporateConfig(){
+     return {
+       aws_key: papiAwsCredJsonObj.awsKey, // REQUIRED -- set this to your AWS_ACCESS_KEY_ID
+
+       bucket: papiAwsCredJsonObj.bucket, // REQUIRED -- set this to your s3 bucket name
+
+       awsRegion: papiAwsCredJsonObj.region, // OPTIONAL -- change this if your bucket is outside us-east-1
+
+       cloudfront: true,
+
+       xhrWithCredentials: true,
+
+       signerUrl: UPLOAD_SINGER_URL,
+
+       awsSignatureVersion: '4',
+
+       computeContentMd5: true,
+
+       signHeaders: {
+
+         'Authorization' : 'oauth ' + getAccessToken(),
+         "Content-Type": "application/vnd.api+json",
+         'Origin' : 'localhost'
+
+       },
+
+       aws_url: papiAwsCredJsonObj.awsUrl,
+
+       cryptoMd5Method: function (data) { return AWS.util.crypto.md5(data, 'base64'); },
+
+       cryptoHexEncodedHash256: function (data) { return AWS.util.crypto.sha256(data, 'hex'); }
+     }
+  }
+
+  function initEvaporate(config){
+
+        Evaporate.create(config)
+
+        .then(
+
+          // Successfully created evaporate instance `_e_`
+
+          function success(_e_) {
+
+            var fileInput = document.getElementById('files'),
+
+                filePromises = [];
+
+
+
+            // Start a new evaporate upload anytime new files are added in the file input
+
+            fileInput.onchange = function(evt) {
+
+              var files = evt.target.files;
+
+              for (var i = 0; i < files.length; i++) {
+
+                var promise = _e_.add({
+
+                  name: files[i].name,
+
+                  file: files[i],
+
+                  progress: function (progress) {
+
+                    console.log('making progress: ' + progress);
+
+                  }
+
+                })
+
+                .then(function (awsKey) {
+
+                  console.log(awsKey, 'complete!');
+
+                });
+
+                filePromises.push(promise);
+
+              }
+
+
+
+              // Wait until all promises are complete
+
+              Promise.all(filePromises)
+
+                .then(function () {
+
+                  alert("Saved successfully at: " + papiAwsCredJsonObj.awsUrl)
+                  console.log("Saved successfully at: " + papiAwsCredJsonObj.awsUrl)
+
+                }, function (reason) {
+
+                  console.log('All files were not uploaded successfully:', reason);
+
+                });
+
+
+
+              // Clear out the file picker input
+
+              evt.target.value = '';
+
+            };
+
+          },
+
+
+
+          // Failed to create new instance of evaporate
+
+          function failure(reason) {
+
+             console.log('Evaporate failed to initialize: ', reason)
+
+          }
+
+     );
+
+
+}
+
+  </script>
+
+</body>
+
+</html>
